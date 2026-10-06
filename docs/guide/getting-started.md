@@ -44,6 +44,15 @@ inwx whoami         # aktives Profil anzeigen
 inwx logout         # Profil entfernen
 ```
 
+Ohne Terminal (Skript, CI, Agent) geht es auch ohne Rückfragen. Das Passwort kommt über stdin
+oder aus `INWX_PASSWORD`, nie als Argument:
+
+```bash
+printf %s "$INWX_PW" | inwx login --user kunde --password-stdin
+INWX_PASSWORD=… INWX_TOTP_SECRET=… inwx login --user kunde   # Secret wird mitgespeichert
+inwx login --user kunde --password-stdin --totp-code 123456   # einmaliger 2FA-Code
+```
+
 `inwx login` fragt Benutzername, Passwort und optional die 2FA-Konfiguration ab, verifiziert
 die Zugangsdaten mit einem echten `account.login`-Aufruf und speichert sie erst danach in
 `~/.inwx/config.json` (Dateirechte `0600`).
@@ -58,7 +67,8 @@ will, nutzt Umgebungsvariablen.
 
 Bei aktiver 2FA kannst du das Base32-TOTP-Secret hinterlegen, dann erzeugt die CLI die Codes
 selbst (RFC 6238, SHA-1, 6 Stellen, 30 s). Alternativ fragt sie bei jeder Aktion nach dem
-aktuellen 6-stelligen Code. Intern läuft `account.login` gefolgt von `account.unlock`.
+aktuellen 6-stelligen Code, ohne Terminal über die globale Option `--totp-code <code>`.
+Intern läuft `account.login` gefolgt von `account.unlock`.
 
 ### Umgebungsvariablen
 
