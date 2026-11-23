@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Command } from 'commander';
 import {
@@ -182,6 +182,134 @@ async function withClient<T>(env: Env, fn: (client: Domrobot) => Promise<T>): Pr
       /* egal */
     }
   }
+}
+
+/* ────────────────────────── accounting ────────────────────────── */
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function checkDate(flag: string, v: string | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  if (!DATE_RE.test(v)) die(`${flag} erwartet ein Datum im Format JJJJ-MM-TT, nicht "${v}".`);
+  return v;
+}
+
+function euro(n: number): string {
+  return n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+}
+
+function inRange(date: string, from?: string, to?: string): boolean {
+  const d = date.slice(0, 10);
+  return (!from || d >= from) && (!to || d <= to);
+}
+
+interface AccountingRangeOpts {
+  from?: string;
+  to?: string;
+  json?: boolean;
+}
+
+async function cmdAccountingInvoices(opts: AccountingRangeOpts): Promise<void> {
+  const env = envFromOpts();
+  const from = checkDate('--from', opts.from);
+  const to = checkDate('--to', opts.to);
+  if (opts.json) startJsonOutput({ command: 'accounting invoices', env, from, to });
+  await withClient(env, async (client) => {
+    const all = await client.listInvoices();
+    const rows = all.filter((i) => inRange(i.date, from, to)).sort((a, b) => a.date.localeCompare(b.date));
+    if (opts.json) {
+      jsonOut?.({ ok: true, invoices: rows });
+      return;
+    }
+    console.log('');
+    console.log(`  ${brand('accounting invoices')} ${envBadge(env)}  ${dim(rows.length + ' von ' + all.length + ' Belegen')}`);
+    console.log('');
+    for (const i of rows) {
+      console.log(`  ${i.date}  ${accent(i.invoiceId.padEnd(12))} ${i.type.padEnd(12)} ${euro(i.afterTax).padStart(12)}  ${dim('netto ' + euro(i.preTax))}`);
+    }
+    const sum = rows.reduce((a, i) => a + i.afterTax, 0);
+    console.log('');
+    console.log(`  ${dim('Summe brutto')} ${euro(sum)}`);
+    console.log('');
+  });
+}
+
+interface AccountingInvoiceOpts extends AccountingRangeOpts {
+  out: string;
+  xml?: boolean;
+}
+
+async function cmdAccountingInvoice(ids: string[], opts: AccountingInvoiceOpts): Promise<void> {
+  const env = envFromOpts();
+  const from = checkDate('--from', opts.from);
+  const to = checkDate('--to', opts.to);
+  if (!ids.length && !from && !to) die('Rechnungsnummern angeben oder einen Zeitraum mit --from/--to.');
+  if (opts.json) startJsonOutput({ command: 'accounting invoice', env });
+  const outDir = resolve(opts.out);
+  await mkdir(outDir, { recursive: true });
+  await withClient(env, async (client) => {
+    const list = await client.listInvoices();
+    const byId = new Map(list.map((i) => [i.invoiceId, i]));
+    const wanted = ids.length ? ids : list.filter((i) => inRange(i.date, from, to)).map((i) => i.invoiceId);
+    const files: Array<Record<string, unknown>> = [];
+    for (const id of wanted) {
+      const meta = byId.get(id);
+      const { pdf, xml } = await client.getInvoice(id);
+      const base = `${meta?.date ?? 'unbekannt'}_INWX_${id}`;
+      const pdfPath = resolve(outDir, base + '.pdf');
+      await writeFile(pdfPath, pdf);
+      let xmlPath: string | undefined;
+      if (opts.xml && xml) {
+        xmlPath = resolve(outDir, base + '.xml');
+        await writeFile(xmlPath, xml);
+      }
+      files.push({ invoiceId: id, date: meta?.date, afterTax: meta?.afterTax, type: meta?.type, pdf: pdfPath, xml: xmlPath });
+      if (!opts.json) console.log(`  ${ok('✓')} ${id} ${dim('→')} ${pdfPath}${xmlPath ? dim(' + .xml') : ''}`);
+    }
+    if (opts.json) jsonOut?.({ ok: true, files });
+    else console.log(`\n  ${files.length} Beleg(e) gespeichert in ${outDir}\n`);
+  });
+}
+
+interface AccountingStatementOpts extends AccountingRangeOpts {
+  csv?: string;
+}
+
+async function cmdAccountingStatement(opts: AccountingStatementOpts): Promise<void> {
+  const env = envFromOpts();
+  const from = checkDate('--from', opts.from) ?? die('--from ist Pflicht (JJJJ-MM-TT).');
+  const to = checkDate('--to', opts.to) ?? new Date().toISOString().slice(0, 10);
+  if (opts.json) startJsonOutput({ command: 'accounting statement', env, from, to });
+  await withClient(env, async (client) => {
+    const rows = (await client.accountingLog(from, to))
+      .map((r) => ({ ...r, date: apiDateStr(r.date) }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+    const payments = rows.filter((r) => r.amount > 0).reduce((a, r) => a + r.amount, 0);
+    const charges = rows.filter((r) => r.amount < 0).reduce((a, r) => a + r.amount, 0);
+    if (opts.csv) {
+      const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const lines = ['Datum;Typ;Details;Betrag;ID'].concat(
+        rows.map((r) => [r.date, r.type, r.details, r.amount.toFixed(2).replace('.', ','), r.id].map(esc).join(';')),
+      );
+      await writeFile(resolve(opts.csv), lines.join('\n') + '\n');
+    }
+    if (opts.json) {
+      jsonOut?.({ ok: true, payments, charges, net: payments + charges, entries: rows, csv: opts.csv ? resolve(opts.csv) : undefined });
+      return;
+    }
+    console.log('');
+    console.log(`  ${brand('accounting statement')} ${envBadge(env)}  ${dim(from + ' bis ' + to)}`);
+    console.log('');
+    for (const r of rows) {
+      const amt = euro(r.amount).padStart(12);
+      console.log(`  ${r.date}  ${r.type.padEnd(10)} ${String(r.details ?? '').padEnd(22)} ${r.amount < 0 ? warn(amt) : ok(amt)}`);
+    }
+    console.log('');
+    console.log(`  ${dim('Aufladungen')}  ${euro(payments)}`);
+    console.log(`  ${dim('Belastungen')}  ${euro(charges)}`);
+    console.log(`  ${dim('Saldo im Zeitraum')} ${euro(payments + charges)}`);
+    if (opts.csv) console.log(`  ${dim('CSV')} ${resolve(opts.csv)}`);
+    console.log('');
+  });
 }
 
 /* ────────────────────────── login ────────────────────────── */
@@ -1146,6 +1274,35 @@ export function buildProgram(): Command {
         'Exit-Codes: 0 = registriert bzw. validiert, 1 = abgebrochen, fehlgeschlagen oder ausstehend.',
     )
     .action(cmdDomainBuy);
+
+  const accounting = program.command('accounting').description('Buchhaltung: Rechnungen und Kontoauszug (nur lesend)');
+  accounting
+    .command('invoices')
+    .alias('ls')
+    .description('Rechnungen und Gutschriften auflisten')
+    .option('--from <datum>', 'ab Datum (JJJJ-MM-TT)')
+    .option('--to <datum>', 'bis Datum (JJJJ-MM-TT)')
+    .option('--json', 'Ergebnis als JSON auf stdout')
+    .action(cmdAccountingInvoices);
+  accounting
+    .command('invoice [ids...]')
+    .alias('download')
+    .description('Rechnungen als PDF speichern (Nummern oder Zeitraum)')
+    .requiredOption('-o, --out <ordner>', 'Zielordner')
+    .option('--from <datum>', 'alle Rechnungen ab Datum (statt Nummern)')
+    .option('--to <datum>', 'alle Rechnungen bis Datum')
+    .option('--xml', 'E-Rechnung (XML) zusätzlich speichern')
+    .option('--json', 'Ergebnis als JSON auf stdout')
+    .action(cmdAccountingInvoice);
+  accounting
+    .command('statement')
+    .alias('log')
+    .description('Kontoauszug: Aufladungen und Belastungen des Guthabens')
+    .option('--from <datum>', 'ab Datum (JJJJ-MM-TT), Pflicht')
+    .option('--to <datum>', 'bis Datum (JJJJ-MM-TT), Standard heute')
+    .option('--csv <datei>', 'zusätzlich als CSV speichern (Semikolon, deutsches Komma)')
+    .option('--json', 'Ergebnis als JSON auf stdout')
+    .action(cmdAccountingStatement);
 
   const contact = program.command('contact').description('Domain-Kontakte (Handles) verwalten');
   contact.command('ls').alias('list').description('Kontakte auflisten').action(cmdContactLs);

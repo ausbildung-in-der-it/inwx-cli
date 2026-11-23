@@ -241,3 +241,40 @@ export interface ResolvedProfile {
   fromEnv: boolean;
   savedAt?: string;
 }
+
+/* ── Buchhaltung (accounting.*) ── */
+
+export interface InvoiceListEntry {
+  invoiceId: string;
+  date: string;
+  afterTax: number;
+  preTax: number;
+  type: string;
+  xml?: boolean;
+}
+
+export interface InvoiceListResData {
+  count?: number;
+  invoice?: InvoiceListEntry[];
+}
+
+export interface InvoiceResData {
+  /** PDF als Base64 */
+  pdf?: string;
+  /** E-Rechnung (XRechnung/ZUGFeRD-XML), falls vorhanden */
+  xml?: string;
+}
+
+export interface AccountingLogEntry {
+  id: number;
+  date: unknown;
+  amount: number;
+  type: string;
+  details?: string;
+  refundable?: boolean;
+}
+
+export interface AccountingLogResData {
+  count?: number;
+  log?: AccountingLogEntry[];
+}

@@ -68,3 +68,38 @@ test('createNameserverZone: sendet MASTER-Zone mit mindestens zwei Nameservern',
     },
   });
 });
+
+test('accountingLog: holt alle Seiten von accounting.log', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const pages: number[] = [];
+  globalThis.fetch = (async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.method, 'accounting.log');
+    assert.equal(body.params.dateFrom, '2026-01-01');
+    pages.push(body.params.page);
+    const size = body.params.pagelimit as number;
+    const rows = body.params.page === 1 ? size : 3;
+    const log = Array.from({ length: rows }, (_, i) => ({ id: body.params.page * 1000 + i, amount: -1, type: 'Invoice', date: '2026-02-01' }));
+    return new Response(JSON.stringify({ code: 1000, msg: 'ok', resData: { count: size + 3, log } }));
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const rows = await new Domrobot('ote').accountingLog('2026-01-01', '2026-02-28');
+  assert.deepEqual(pages, [1, 2]);
+  assert.equal(rows.length, 253);
+});
+
+test('getInvoice: dekodiert das PDF und reicht das XML durch', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.method, 'accounting.getInvoice');
+    assert.equal(body.params.invoiceId, '2026000123');
+    return new Response(JSON.stringify({ code: 1000, msg: 'ok', resData: { pdf: Buffer.from('%PDF-1.7').toString('base64'), xml: '<x/>' } }));
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const inv = await new Domrobot('ote').getInvoice('2026000123');
+  assert.equal(inv.pdf.toString(), '%PDF-1.7');
+  assert.equal(inv.xml, '<x/>');
+});

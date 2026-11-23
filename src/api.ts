@@ -24,6 +24,11 @@ import type {
   NameserverInfoResData,
   UpdateRecordInput,
   UpdateDomainInput,
+  InvoiceListEntry,
+  InvoiceListResData,
+  InvoiceResData,
+  AccountingLogEntry,
+  AccountingLogResData,
 } from './types.js';
 
 const ENDPOINTS: Record<Env, string> = {
@@ -232,6 +237,42 @@ export class Domrobot {
     const r = await this.call<DomainPricesResData>('domain.getPrices', { tld: tlds });
     if (r.code !== 1000) throw new ApiError(r, 'domain.getPrices');
     return r.resData?.price ?? r.resData?.pricelist ?? [];
+  }
+
+  /* ── Buchhaltung ── */
+
+  /** Alle Rechnungen und Gutschriften des Kontos (accounting.listInvoices, ohne Paging-Parameter). */
+  async listInvoices(): Promise<InvoiceListEntry[]> {
+    const r = await this.call<InvoiceListResData>('accounting.listInvoices');
+    if (r.code !== 1000) throw new ApiError(r, 'accounting.listInvoices');
+    return r.resData?.invoice ?? [];
+  }
+
+  /** Eine Rechnung als PDF (Buffer) plus E-Rechnungs-XML, falls INWX eines liefert. */
+  async getInvoice(invoiceId: string): Promise<{ pdf: Buffer; xml?: string }> {
+    const r = await this.call<InvoiceResData>('accounting.getInvoice', { invoiceId });
+    if (r.code !== 1000) throw new ApiError(r, 'accounting.getInvoice');
+    const b64 = r.resData?.pdf;
+    if (!b64) throw new Error(`INWX lieferte für Rechnung ${invoiceId} kein PDF.`);
+    return { pdf: Buffer.from(b64, 'base64'), xml: r.resData?.xml || undefined };
+  }
+
+  /**
+   * Kontobewegungen (accounting.log): Zahlungen (Aufladungen) und Rechnungen, die vom Guthaben
+   * abgehen. Holt alle Seiten. dateFrom/dateTo als YYYY-MM-DD.
+   */
+  async accountingLog(dateFrom: string, dateTo: string): Promise<AccountingLogEntry[]> {
+    const out: AccountingLogEntry[] = [];
+    const pagelimit = 250;
+    for (let page = 1; page < 100; page++) {
+      const r = await this.call<AccountingLogResData>('accounting.log', { dateFrom, dateTo, page, pagelimit });
+      if (r.code !== 1000) throw new ApiError(r, 'accounting.log');
+      const rows = r.resData?.log ?? [];
+      out.push(...rows);
+      const total = r.resData?.count ?? out.length;
+      if (rows.length < pagelimit || out.length >= total) break;
+    }
+    return out;
   }
 
   async listDomains(): Promise<DomainListEntry[]> {

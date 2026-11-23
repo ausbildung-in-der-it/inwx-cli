@@ -161,6 +161,9 @@ Profile werden in `~/.inwx/config.json` mit Dateirechten `0600` abgelegt:
 | `inwx domain buy <name>`                           | Domain registrieren (Standard: OT&E)           |
 | `inwx contact ls`                                  | Domain-Kontakte (Handles) auflisten            |
 | `inwx contact add`                                 | Kontakt anlegen (interaktiv oder per Flags)    |
+| `inwx accounting invoices`                         | Rechnungen auflisten (`--from`, `--to`)        |
+| `inwx accounting invoice <nr...> -o <ordner>`      | Rechnungs-PDFs speichern (auch per Zeitraum)   |
+| `inwx accounting statement --from <datum>`         | Kontoauszug: Aufladungen und Belastungen       |
 
 Globale Option `--ote` schaltet jeden Befehl auf das OT&E-Testsystem, `--totp-code <code>`
 liefert einen einmaligen 2FA-Code mit.
@@ -294,6 +297,23 @@ Default-Set setzen:
 inwx dns zone add example.de
 inwx domain ns example.de --yes
 ```
+
+## Buchhaltung (READ-ONLY)
+
+Rechnungen und Kontoauszug für die Steuerberatung, über `accounting.listInvoices`,
+`accounting.getInvoice` und `accounting.log`. Alles nur lesend.
+
+```bash
+inwx accounting invoices --from 2026-01-01                 # Rechnungen mit Brutto/Netto
+inwx accounting invoice --from 2026-07-01 -o ./inwx --xml  # alle PDFs ab Juli, dazu die E-Rechnung (XML)
+inwx accounting invoice 2026000123 -o ./inwx               # einzelne Rechnung
+inwx accounting statement --from 2025-01-01 --csv konto.csv  # Kontoauszug, CSV mit Semikolon und deutschem Komma
+```
+
+Das Konto läuft auf Guthaben: Kartenzahlungen erscheinen als `Payment` (Aufladung), die
+Monatsrechnung wird als `Invoice` vom Guthaben abgebucht. In der Buchhaltung sind deshalb die
+Rechnungen die Belege, die Aufladungen auf dem Bankkonto brauchen keinen eigenen Beleg.
+Dateinamen: `<rechnungsdatum>_INWX_<nummer>.pdf`. Alle Befehle kennen `--json`.
 
 ## Kontakte
 
