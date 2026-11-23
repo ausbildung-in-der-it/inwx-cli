@@ -66,13 +66,23 @@ inwx domain buy meine-idee.de --registrant 12345 --dry-run
 
 # 4) Echter, kostenpflichtiger Kauf auf PROD
 inwx domain buy meine-idee.de --registrant 12345 --yes-live
+
+# 5) Dasselbe ohne Terminal (Skript, CI, Agent)
+inwx domain buy meine-idee.de --registrant 12345 --yes-live --yes --confirm meine-idee.de
+
+# 6) Ergebnis als JSON auf stdout
+inwx domain buy meine-idee.de --registrant 12345 --yes-live --yes --confirm meine-idee.de --json
 ```
 
 ::: danger Sicherheitsmodell
 - Ohne `--yes-live` läuft `buy` **immer** gegen OT&E, ein `domain.create` auf PROD ist ohne
   dieses Flag technisch ausgeschlossen.
-- `-y/--yes` überspringt die Rückfrage **nur auf OT&E**; bei `--yes-live` muss der Domainname
+- `-y/--yes` überspringt die Ja/Nein-Rückfrage; bei `--yes-live` muss der Domainname
   trotzdem exakt eingetippt werden.
+- `--confirm <domain>` ersetzt das Eintippen. Weicht der Wert vom Domainnamen ab
+  (Groß-/Kleinschreibung und Leerzeichen am Rand egal), bricht der Befehl ab, nichts wird gekauft.
+- Ohne Terminal und ohne `--yes` bzw. `--confirm` bricht ein echter Kauf mit Exit-Code 1 und
+  einem Hinweis auf das fehlende Flag ab. `--dry-run` braucht keine Bestätigung. Exit-Code 0 heißt: registriert bzw. validiert.
 - INWX verlangt alle vier Kontakt-Handles. Ohne `--admin/--tech/--billing` übernimmt die CLI
   den Registranten.
 :::

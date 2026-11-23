@@ -90,6 +90,15 @@ inwx whoami           # aktives Profil anzeigen
 inwx logout           # Profil entfernen
 ```
 
+Ohne Terminal (Skript, CI, Agent) geht es auch ohne Rückfragen. Das Passwort kommt über stdin
+oder aus `INWX_PASSWORD`, nie als Argument:
+
+```bash
+printf %s "$PW" | inwx login --user kunde --password-stdin   # $PW vorher setzen, z. B. aus dem Passwortmanager
+INWX_PASSWORD=… INWX_TOTP_SECRET=… inwx login --user kunde   # Secret wird mitgespeichert
+printf %s "$PW" | inwx login --user kunde --password-stdin --totp-code 123456   # einmaliger 2FA-Code
+```
+
 ### Zwei-Faktor-Authentifizierung (TOTP)
 
 Ist auf dem Account 2FA aktiv, gibt es zwei Betriebsmodi:
@@ -97,7 +106,8 @@ Ist auf dem Account 2FA aktiv, gibt es zwei Betriebsmodi:
 1. **Secret hinterlegen:** das Base32-TOTP-Secret (aus der 2FA-Einrichtung) wird gespeichert;
    die CLI erzeugt gültige Codes selbst (RFC 6238, SHA-1, 6 Stellen, 30 s, via `otpauth`).
 2. **Interaktiv:** kein Secret gespeichert; jede authentifizierte Aktion fragt den aktuellen
-   6-stelligen Code ab.
+   6-stelligen Code ab. Ohne Terminal ersetzt die globale Option `--totp-code <code>` diese
+   Rückfrage, fehlt sie, bricht der Befehl mit Hinweis ab.
 
 Intern wird `account.login` gefolgt von `account.unlock` mit dem generierten bzw. eingegebenen
 `tan` ausgeführt.
@@ -151,8 +161,30 @@ Profile werden in `~/.inwx/config.json` mit Dateirechten `0600` abgelegt:
 | `inwx domain buy <name>`                           | Domain registrieren (Standard: OT&E)           |
 | `inwx contact ls`                                  | Domain-Kontakte (Handles) auflisten            |
 | `inwx contact add`                                 | Kontakt anlegen (interaktiv oder per Flags)    |
+| `inwx accounting invoices`                         | Rechnungen auflisten (`--from`, `--to`)        |
+| `inwx accounting invoice <nr...> -o <ordner>`      | Rechnungs-PDFs speichern (auch per Zeitraum)   |
+| `inwx accounting statement --from <datum>`         | Kontoauszug: Aufladungen und Belastungen       |
 
-Globale Option `--ote` schaltet jeden Befehl auf das OT&E-Testsystem.
+Globale Option `--ote` schaltet jeden Befehl auf das OT&E-Testsystem, `--totp-code <code>`
+liefert einen einmaligen 2FA-Code mit.
+
+### Ohne Terminal (Skripte, CI, Agenten)
+
+Jede Rückfrage hat ein Flag-Äquivalent. Ist stdin kein Terminal und fehlt das Flag, bricht der
+Befehl sofort mit Exit-Code 1 und einem Hinweis auf das Flag ab, statt still zu enden:
+
+| Befehl              | Rückfrage                        | Flag                                   |
+| ------------------- | -------------------------------- | -------------------------------------- |
+| `login`             | Benutzer, Passwort, 2FA          | `--user`, `--password-stdin`/`INWX_PASSWORD`, `INWX_TOTP_SECRET` |
+| alle mit Login      | 2FA-Code ohne gespeichertes Secret | `--totp-code <code>`                 |
+| `domain buy`        | Ja/Nein mit Preis                | `--yes`                                |
+| `domain buy --yes-live` | Domainname eintippen         | `--confirm <domain>`                   |
+| `domain ns`         | Ja/Nein                          | `--yes`                                |
+| `dns rm`            | Ja/Nein                          | `--yes`                                |
+| `dns apply`         | Ja/Nein                          | `--yes` (oder `--dry-run`)             |
+| `contact add`       | alle Felder                      | `--name --street --pc --city --email --voice` |
+
+Exit-Codes: `0` bei Erfolg, `1` bei Abbruch, Fehler oder unvollständiger Ausführung.
 
 ## Domains
 
@@ -214,6 +246,12 @@ inwx domain buy meine-idee.de --registrant 12345 --dry-run
 
 # 4) Echter, kostenpflichtiger Kauf auf PROD (erfordert --yes-live + Tippbestätigung)
 inwx domain buy meine-idee.de --registrant 12345 --yes-live
+
+# 5) Dasselbe ohne Terminal: --confirm ersetzt die Tippbestätigung
+inwx domain buy meine-idee.de --registrant 12345 --yes-live --yes --confirm meine-idee.de
+
+# 6) Maschinenlesbar: genau ein JSON-Objekt auf stdout, Fortschritt auf stderr
+inwx domain buy meine-idee.de --registrant 12345 --yes-live --yes --confirm meine-idee.de --json
 ```
 
 | Option                    | Default                  | Beschreibung                                   |
@@ -224,8 +262,10 @@ inwx domain buy meine-idee.de --registrant 12345 --yes-live
 | `--ns <liste>`            | `ns.inwx.de,ns2.inwx.de` | Nameserver (kommasepariert)                    |
 | `--renewal-mode <modus>`  | –                        | `AUTORENEW`, `AUTOEXPIRE`, `AUTODELETE`        |
 | `--dry-run`               | –                        | nur validieren (`testing=true`)                |
-| `-y, --yes`               | –                        | Rückfrage überspringen (nur OT&E)              |
+| `-y, --yes`               | –                        | Ja/Nein-Rückfrage überspringen                 |
 | `--yes-live`              | –                        | echte PROD-Registrierung erlauben              |
+| `--confirm <domain>`      | –                        | ersetzt die getippte LIVE-Bestätigung          |
+| `--json`                  | –                        | Ergebnis als JSON, keine Rückfragen            |
 
 **Sicherheitsmodell:**
 
@@ -233,8 +273,20 @@ inwx domain buy meine-idee.de --registrant 12345 --yes-live
   dieses Flag technisch ausgeschlossen.
 - Vor dem Kauf zeigt der Befehl Verfügbarkeit und Preis aus `domain.check`. Ist die Domain nicht
   frei, bricht er ab.
-- Es folgt eine Bestätigung mit Preisanzeige. `-y/--yes` überspringt diese Rückfrage **nur auf
-  OT&E**; bei `--yes-live` muss der Domainname trotzdem exakt eingetippt werden.
+- Es folgt eine Bestätigung mit Preisanzeige, `-y/--yes` überspringt sie. Bei `--yes-live`
+  muss der Domainname zusätzlich exakt eingetippt werden, `--yes` ändert daran nichts.
+- `--confirm <domain>` ersetzt das Eintippen. Der Wert muss dem Domainnamen entsprechen (gleiche
+  Prüfung wie beim Eintippen: Leerzeichen am Rand und Groß-/Kleinschreibung egal). Weicht er ab,
+  bricht der Befehl vor dem Login ab, auch bei `--dry-run`. Der Name steht also weiterhin
+  ausdrücklich ein zweites Mal da, nur im Befehl statt im Prompt.
+- Ohne Terminal und ohne `--yes` bzw. `--confirm` bricht der Befehl vor dem Login mit Exit-Code 1
+  ab, etwa `LIVE-Kauf braucht eine Bestätigung: --confirm meine-idee.de angeben oder ein
+  interaktives Terminal nutzen.` `--dry-run` braucht keine Bestätigung.
+- Exit-Codes: `0` = registriert bzw. validiert, `1` = abgebrochen, fehlgeschlagen oder bei der
+  Registry ausstehend (Code 1001).
+- `--json` gibt `{ command, domain, env, dryRun, ok, status, apiCode, … }` aus, `status` ist
+  `registered`, `validated`, `pending`, `unavailable`, `cancelled` oder `error` (dann mit `error`
+  und, falls von INWX, `apiCode`/`apiReason`).
 - INWX verlangt alle vier Kontakt-Handles. Werden `--admin/--tech/--billing` nicht gesetzt,
   übernimmt die CLI den Registranten.
 
@@ -245,6 +297,23 @@ Default-Set setzen:
 inwx dns zone add example.de
 inwx domain ns example.de --yes
 ```
+
+## Buchhaltung (READ-ONLY)
+
+Rechnungen und Kontoauszug für die Steuerberatung, über `accounting.listInvoices`,
+`accounting.getInvoice` und `accounting.log`. Alles nur lesend.
+
+```bash
+inwx accounting invoices --from 2026-01-01                 # Rechnungen mit Brutto/Netto
+inwx accounting invoice --from 2026-07-01 -o ./inwx --xml  # alle PDFs ab Juli, dazu die E-Rechnung (XML)
+inwx accounting invoice 2026000123 -o ./inwx               # einzelne Rechnung
+inwx accounting statement --from 2025-01-01 --csv konto.csv  # Kontoauszug, CSV mit Semikolon und deutschem Komma
+```
+
+Das Konto läuft auf Guthaben: Kartenzahlungen erscheinen als `Payment` (Aufladung), die
+Monatsrechnung wird als `Invoice` vom Guthaben abgebucht. In der Buchhaltung sind deshalb die
+Rechnungen die Belege, die Aufladungen auf dem Bankkonto brauchen keinen eigenen Beleg.
+Dateinamen: `<rechnungsdatum>_INWX_<nummer>.pdf`. Alle Befehle kennen `--json`.
 
 ## Kontakte
 
@@ -265,7 +334,8 @@ inwx contact add \
 `contact add` legt einen Kontakt über `contact.create` an und gibt die neue Kontakt-ID aus
 (direkt nutzbar als `domain buy --registrant <id>`). Werden **alle Pflichtfelder** als Flags
 übergeben (`--name`, `--street`, `--pc`, `--city`, `--email`, `--voice`), läuft der Befehl
-komplett ohne Prompts; sonst fragt er die fehlenden Felder interaktiv ab.
+komplett ohne Prompts; sonst fragt er die fehlenden Felder interaktiv ab. Ohne Terminal bricht
+er stattdessen ab und nennt die fehlenden Flags.
 
 | Flag                | Default    | Hinweis                                        |
 | ------------------- | ---------- | ---------------------------------------------- |
@@ -391,6 +461,9 @@ inwx dns apply zone.json             # mit Bestätigung schreiben
 inwx dns apply zone.json --yes       # ohne Rückfrage (CI/Automation)
 ```
 
+Ohne Terminal und ohne `--yes` zeigt `apply` bei anstehenden Änderungen den Plan und bricht dann
+mit Exit-Code 1 ab, ohne etwas zu schreiben. Ist nichts zu tun, endet er ohne Rückfrage mit 0. Schlägt beim Schreiben ein Record fehl, endet der Befehl ebenfalls mit 1.
+
 Der `--dry-run` liest die reale Zone (read-only) und ist damit ein gefahrloser Vorab-Check,
 auch ohne separaten OT&E-Account.
 
@@ -436,6 +509,7 @@ src/api.ts           DomRobot-Client (JSON-RPC, Session, TOTP, Record-/Domain-/K
 src/config.ts        Profil-/Credential-Verwaltung (~/.inwx)
 src/ui.ts            Ausgabe (Farben, Tabellen, Plan-Diff)
 src/validate.ts      Validierung (Domain-Syntax, TLD-Ableitung, Periode, Ländercode)
+src/interactive.ts   Rückfragen ohne Terminal (TTY-Erkennung, --yes/--confirm-Logik)
 src/types.ts         Interfaces für DomRobot-Requests/-Responses, Config, Optionen
 test/*.test.ts       Unit-Tests (node --test, ohne Netzwerk)
 records/             Beispiel-Zonendatei
@@ -449,7 +523,8 @@ dist/                Build-Ausgabe (nicht eingecheckt)
 - Es werden keine Zugangsdaten geloggt oder an Dritte gesendet; einziger Kontakt ist die
   DomRobot-API.
 - `domain buy` registriert standardmäßig nur auf OT&E; ein echter, kostenpflichtiger Kauf auf
-  PROD verlangt das explizite Flag `--yes-live` und eine Tippbestätigung des Domainnamens.
+  PROD verlangt das explizite Flag `--yes-live` und eine Tippbestätigung des Domainnamens
+  (ohne Terminal: `--confirm <domain>`).
 - Empfehlung: einen INWX-Sub-Account mit auf DNS/Domains beschränkten Rechten verwenden.
 
 ## Tests
@@ -461,7 +536,10 @@ npm test
 ```
 
 Abgedeckt: FQDN-Ableitung (`toFqdn`), TOTP-Generierung (RFC-6238-Vektoren),
-Domain-Validierung, TLD-Ableitung inkl. mehrteiliger Suffixe, Perioden- und Ländercode-Parsing.
+Domain-Validierung, TLD-Ableitung inkl. mehrteiliger Suffixe, Perioden- und Ländercode-Parsing,
+Bestätigungslogik von `domain buy` (`--yes`, `--confirm`, kein TTY) und die gebaute CLI ohne
+Terminal (`test/cli-noninteractive.test.ts`, mit leerem `HOME` und ohne Zugangsdaten, also ohne
+API-Aufruf).
 
 ## Roadmap
 
