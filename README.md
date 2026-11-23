@@ -94,9 +94,9 @@ Ohne Terminal (Skript, CI, Agent) geht es auch ohne Rückfragen. Das Passwort ko
 oder aus `INWX_PASSWORD`, nie als Argument:
 
 ```bash
-printf %s "$INWX_PW" | inwx login --user kunde --password-stdin
+printf %s "$PW" | inwx login --user kunde --password-stdin   # $PW vorher setzen, z. B. aus dem Passwortmanager
 INWX_PASSWORD=… INWX_TOTP_SECRET=… inwx login --user kunde   # Secret wird mitgespeichert
-inwx login --user kunde --password-stdin --totp-code 123456   # einmaliger 2FA-Code
+printf %s "$PW" | inwx login --user kunde --password-stdin --totp-code 123456   # einmaliger 2FA-Code
 ```
 
 ### Zwei-Faktor-Authentifizierung (TOTP)
@@ -461,8 +461,8 @@ inwx dns apply zone.json             # mit Bestätigung schreiben
 inwx dns apply zone.json --yes       # ohne Rückfrage (CI/Automation)
 ```
 
-Ohne Terminal und ohne `--yes` zeigt `apply` den Plan und bricht dann mit Exit-Code 1 ab, ohne
-etwas zu schreiben. Schlägt beim Schreiben ein Record fehl, endet der Befehl ebenfalls mit 1.
+Ohne Terminal und ohne `--yes` zeigt `apply` bei anstehenden Änderungen den Plan und bricht dann
+mit Exit-Code 1 ab, ohne etwas zu schreiben. Ist nichts zu tun, endet er ohne Rückfrage mit 0. Schlägt beim Schreiben ein Record fehl, endet der Befehl ebenfalls mit 1.
 
 Der `--dry-run` liest die reale Zone (read-only) und ist damit ein gefahrloser Vorab-Check,
 auch ohne separaten OT&E-Account.

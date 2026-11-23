@@ -19,7 +19,7 @@ const HOME = mkdtempSync(join(tmpdir(), 'inwx-cli-test-'));
 after(() => rmSync(HOME, { recursive: true, force: true }));
 
 function inwx(...args: string[]) {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME, NO_COLOR: '1' };
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME, USERPROFILE: HOME, NO_COLOR: '1' };
   for (const key of Object.keys(env)) if (key.startsWith('INWX_')) delete env[key];
   const r = spawnSync(process.execPath, [BIN, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 20_000 });
   return { code: r.status, stdout: r.stdout, out: r.stdout + r.stderr };

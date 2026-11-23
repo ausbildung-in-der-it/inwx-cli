@@ -76,6 +76,7 @@ test('accountingLog: holt alle Seiten von accounting.log', async (t) => {
     const body = JSON.parse(String(init?.body));
     assert.equal(body.method, 'accounting.log');
     assert.equal(body.params.dateFrom, '2026-01-01');
+    assert.equal(body.params.dateTo, '2026-02-28');
     pages.push(body.params.page);
     const size = body.params.pagelimit as number;
     const rows = body.params.page === 1 ? size : 3;

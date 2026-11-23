@@ -48,9 +48,9 @@ Ohne Terminal (Skript, CI, Agent) geht es auch ohne Rückfragen. Das Passwort ko
 oder aus `INWX_PASSWORD`, nie als Argument:
 
 ```bash
-printf %s "$INWX_PW" | inwx login --user kunde --password-stdin
+printf %s "$PW" | inwx login --user kunde --password-stdin   # $PW vorher setzen, z. B. aus dem Passwortmanager
 INWX_PASSWORD=… INWX_TOTP_SECRET=… inwx login --user kunde   # Secret wird mitgespeichert
-inwx login --user kunde --password-stdin --totp-code 123456   # einmaliger 2FA-Code
+printf %s "$PW" | inwx login --user kunde --password-stdin --totp-code 123456   # einmaliger 2FA-Code
 ```
 
 `inwx login` fragt Benutzername, Passwort und optional die 2FA-Konfiguration ab, verifiziert

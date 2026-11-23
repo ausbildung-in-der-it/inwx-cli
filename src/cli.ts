@@ -189,8 +189,20 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function checkDate(flag: string, v: string | undefined): string | undefined {
   if (v === undefined) return undefined;
-  if (!DATE_RE.test(v)) die(`${flag} erwartet ein Datum im Format JJJJ-MM-TT, nicht "${v}".`);
+  // Format und echtes Kalenderdatum (kein 2026-02-30): Rundlauf über Date muss denselben Tag ergeben.
+  const d = new Date(`${v}T00:00:00Z`);
+  if (!DATE_RE.test(v) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) {
+    die(`${flag} erwartet ein gültiges Datum im Format JJJJ-MM-TT, nicht "${v}".`);
+  }
   return v;
+}
+
+/** Prüft --from/--to (Format, Kalender, Reihenfolge). */
+function checkRange(fromRaw: string | undefined, toRaw: string | undefined): { from?: string; to?: string } {
+  const from = checkDate('--from', fromRaw);
+  const to = checkDate('--to', toRaw);
+  if (from && to && to < from) die(`--to (${to}) liegt vor --from (${from}).`);
+  return { from, to };
 }
 
 function euro(n: number): string {
@@ -210,14 +222,13 @@ interface AccountingRangeOpts {
 
 async function cmdAccountingInvoices(opts: AccountingRangeOpts): Promise<void> {
   const env = envFromOpts();
-  const from = checkDate('--from', opts.from);
-  const to = checkDate('--to', opts.to);
-  if (opts.json) startJsonOutput({ command: 'accounting invoices', env, from, to });
+  if (opts.json) startJsonOutput({ command: 'accounting invoices', env });
+  const { from, to } = checkRange(opts.from, opts.to);
   await withClient(env, async (client) => {
     const all = await client.listInvoices();
     const rows = all.filter((i) => inRange(i.date, from, to)).sort((a, b) => a.date.localeCompare(b.date));
     if (opts.json) {
-      jsonOut?.({ ok: true, invoices: rows });
+      jsonOut?.({ ok: true, from, to, invoices: rows });
       return;
     }
     console.log('');
@@ -240,10 +251,10 @@ interface AccountingInvoiceOpts extends AccountingRangeOpts {
 
 async function cmdAccountingInvoice(ids: string[], opts: AccountingInvoiceOpts): Promise<void> {
   const env = envFromOpts();
-  const from = checkDate('--from', opts.from);
-  const to = checkDate('--to', opts.to);
-  if (!ids.length && !from && !to) die('Rechnungsnummern angeben oder einen Zeitraum mit --from/--to.');
   if (opts.json) startJsonOutput({ command: 'accounting invoice', env });
+  const { from, to } = checkRange(opts.from, opts.to);
+  if (ids.length && (from || to)) die('Entweder Rechnungsnummern oder einen Zeitraum mit --from/--to angeben, nicht beides.');
+  if (!ids.length && !from && !to) die('Rechnungsnummern angeben oder einen Zeitraum mit --from/--to.');
   const outDir = resolve(opts.out);
   await mkdir(outDir, { recursive: true });
   await withClient(env, async (client) => {
@@ -276,9 +287,11 @@ interface AccountingStatementOpts extends AccountingRangeOpts {
 
 async function cmdAccountingStatement(opts: AccountingStatementOpts): Promise<void> {
   const env = envFromOpts();
-  const from = checkDate('--from', opts.from) ?? die('--from ist Pflicht (JJJJ-MM-TT).');
-  const to = checkDate('--to', opts.to) ?? new Date().toISOString().slice(0, 10);
-  if (opts.json) startJsonOutput({ command: 'accounting statement', env, from, to });
+  if (opts.json) startJsonOutput({ command: 'accounting statement', env });
+  if (!opts.from) die('--from ist Pflicht (JJJJ-MM-TT).');
+  const range = checkRange(opts.from, opts.to ?? new Date().toISOString().slice(0, 10));
+  const from = range.from!;
+  const to = range.to!;
   await withClient(env, async (client) => {
     const rows = (await client.accountingLog(from, to))
       .map((r) => ({ ...r, date: apiDateStr(r.date) }))
@@ -293,7 +306,7 @@ async function cmdAccountingStatement(opts: AccountingStatementOpts): Promise<vo
       await writeFile(resolve(opts.csv), lines.join('\n') + '\n');
     }
     if (opts.json) {
-      jsonOut?.({ ok: true, payments, charges, net: payments + charges, entries: rows, csv: opts.csv ? resolve(opts.csv) : undefined });
+      jsonOut?.({ ok: true, from, to, payments, charges, net: payments + charges, entries: rows, csv: opts.csv ? resolve(opts.csv) : undefined });
       return;
     }
     console.log('');

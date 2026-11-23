@@ -267,7 +267,7 @@ export interface InvoiceResData {
 
 export interface AccountingLogEntry {
   id: number;
-  date: unknown;
+  date: ApiDate;
   amount: number;
   type: string;
   details?: string;

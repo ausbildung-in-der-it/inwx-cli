@@ -264,13 +264,15 @@ export class Domrobot {
   async accountingLog(dateFrom: string, dateTo: string): Promise<AccountingLogEntry[]> {
     const out: AccountingLogEntry[] = [];
     const pagelimit = 250;
-    for (let page = 1; page < 100; page++) {
+    for (let page = 1; ; page++) {
       const r = await this.call<AccountingLogResData>('accounting.log', { dateFrom, dateTo, page, pagelimit });
       if (r.code !== 1000) throw new ApiError(r, 'accounting.log');
       const rows = r.resData?.log ?? [];
       out.push(...rows);
-      const total = r.resData?.count ?? out.length;
-      if (rows.length < pagelimit || out.length >= total) break;
+      // Ende: kurze Seite, oder INWX nennt eine Gesamtzahl und die ist erreicht.
+      if (rows.length < pagelimit) break;
+      const total = r.resData?.count;
+      if (typeof total === 'number' && out.length >= total) break;
     }
     return out;
   }

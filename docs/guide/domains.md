@@ -81,8 +81,8 @@ inwx domain buy meine-idee.de --registrant 12345 --yes-live --yes --confirm mein
   trotzdem exakt eingetippt werden.
 - `--confirm <domain>` ersetzt das Eintippen. Weicht der Wert vom Domainnamen ab
   (Groß-/Kleinschreibung und Leerzeichen am Rand egal), bricht der Befehl ab, nichts wird gekauft.
-- Ohne Terminal und ohne `--yes` bzw. `--confirm` bricht der Befehl mit Exit-Code 1 und einem
-  Hinweis auf das fehlende Flag ab. Exit-Code 0 heißt: registriert bzw. validiert.
+- Ohne Terminal und ohne `--yes` bzw. `--confirm` bricht ein echter Kauf mit Exit-Code 1 und
+  einem Hinweis auf das fehlende Flag ab. `--dry-run` braucht keine Bestätigung. Exit-Code 0 heißt: registriert bzw. validiert.
 - INWX verlangt alle vier Kontakt-Handles. Ohne `--admin/--tech/--billing` übernimmt die CLI
   den Registranten.
 :::
